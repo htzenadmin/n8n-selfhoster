@@ -301,9 +301,36 @@ install_docker_compose() {
 # Start Docker services
 start_docker_services() {
     show_progress 13 15 "Starting N8N services"
-    
+
+    # Verify N8N directory exists
+    if [ ! -d "$N8N_DIR" ]; then
+        log "ERROR" "N8N directory not found: $N8N_DIR"
+        return 1
+    fi
+
     cd "$N8N_DIR" || exit
-    
+
+    # Verify docker-compose.yml exists
+    if [ ! -f "docker-compose.yml" ]; then
+        log "ERROR" "docker-compose.yml not found in $N8N_DIR"
+        log "INFO" "This suggests the N8N setup step failed. Please check previous logs."
+        return 1
+    fi
+
+    # Verify docker-compose.yml is not empty
+    if [ ! -s "docker-compose.yml" ]; then
+        log "ERROR" "docker-compose.yml is empty in $N8N_DIR"
+        return 1
+    fi
+
+    log "INFO" "Found docker-compose.yml, validating configuration..."
+    if ! docker-compose config >/dev/null 2>&1; then
+        log "ERROR" "docker-compose.yml configuration is invalid"
+        log "INFO" "Showing docker-compose validation errors:"
+        docker-compose config
+        return 1
+    fi
+
     # Ensure clean state
     log "INFO" "Ensuring clean Docker state..."
     docker-compose down -v >/dev/null 2>&1 || true

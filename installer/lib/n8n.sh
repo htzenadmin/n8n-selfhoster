@@ -10,11 +10,42 @@
 # Set up N8N with PostgreSQL
 setup_n8n() {
     show_progress 7 15 "Setting up N8N with PostgreSQL"
-    
+
+    # Verify required variables are set
+    if [ -z "${DB_PASSWORD:-}" ]; then
+        log "ERROR" "DB_PASSWORD is not set"
+        return 1
+    fi
+
+    if [ -z "${ADMIN_PASSWORD:-}" ]; then
+        log "ERROR" "ADMIN_PASSWORD is not set"
+        return 1
+    fi
+
+    if [ -z "${DOMAIN_NAME:-}" ]; then
+        log "ERROR" "DOMAIN_NAME is not set"
+        return 1
+    fi
+
+    if [ -z "${TIMEZONE:-}" ]; then
+        log "WARNING" "TIMEZONE is not set, using UTC"
+        export TIMEZONE="UTC"
+    fi
+
+    if [ -z "${N8N_DIR:-}" ]; then
+        log "ERROR" "N8N_DIR is not set"
+        return 1
+    fi
+
+    log "INFO" "Configuration variables verified"
+    log "DEBUG" "Using domain: $DOMAIN_NAME"
+    log "DEBUG" "Using timezone: $TIMEZONE"
+    log "DEBUG" "N8N directory: $N8N_DIR"
+
     # Create N8N directory
     mkdir -p "$N8N_DIR"
     cd "$N8N_DIR" || exit
-    
+
     # Create docker-compose.yml
     log "INFO" "Creating N8N configuration..."
     
