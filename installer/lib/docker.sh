@@ -310,39 +310,71 @@ start_docker_services() {
 
     cd "$N8N_DIR" || exit
 
+    # Debug: List directory contents
+    log "INFO" "Current directory contents:"
+    ls -la
+
     # Verify docker-compose.yml exists
     if [ ! -f "docker-compose.yml" ]; then
         log "ERROR" "docker-compose.yml not found in $N8N_DIR"
         log "INFO" "This suggests the N8N setup step failed. Please check previous logs."
+        log "INFO" "Current working directory: $(pwd)"
+        log "INFO" "Directory listing:"
+        ls -la
         return 1
     fi
 
     # Verify docker-compose.yml is not empty
     if [ ! -s "docker-compose.yml" ]; then
         log "ERROR" "docker-compose.yml is empty in $N8N_DIR"
+        log "INFO" "File size: $(wc -c < docker-compose.yml)"
         return 1
     fi
 
+    # Show first few lines of the file for debugging
+    log "INFO" "First 10 lines of docker-compose.yml:"
+    head -n 10 docker-compose.yml
+
     log "INFO" "Found docker-compose.yml, validating configuration..."
-    if ! docker-compose config >/dev/null 2>&1; then
+
+    # Check docker-compose version and availability
+    log "INFO" "Docker Compose version check:"
+    docker-compose --version || docker compose version || log "ERROR" "No docker-compose found"
+
+    # Try different docker-compose commands (v1 vs v2)
+    local compose_cmd=""
+    if command -v docker-compose >/dev/null 2>&1; then
+        compose_cmd="docker-compose"
+    elif docker compose version >/dev/null 2>&1; then
+        compose_cmd="docker compose"
+    else
+        log "ERROR" "No working docker-compose command found"
+        return 1
+    fi
+
+    log "INFO" "Using compose command: $compose_cmd"
+
+    if ! $compose_cmd config >/dev/null 2>&1; then
         log "ERROR" "docker-compose.yml configuration is invalid"
         log "INFO" "Showing docker-compose validation errors:"
-        docker-compose config
+        $compose_cmd config
+        log "INFO" "Full docker-compose.yml content:"
+        cat docker-compose.yml
         return 1
     fi
 
     # Ensure clean state
     log "INFO" "Ensuring clean Docker state..."
-    docker-compose down -v >/dev/null 2>&1 || true
+    $compose_cmd down -v >/dev/null 2>&1 || true
     docker system prune -f >/dev/null 2>&1 || true
-    
+
     # Start N8N services
     log "INFO" "Starting N8N and PostgreSQL containers..."
     log "INFO" "This may take several minutes to download images..."
-    
+
     # Start PostgreSQL first and wait for it
     log "INFO" "Starting PostgreSQL container..."
-    if ! timeout 300 docker-compose up -d postgres; then
+    if ! timeout 300 $compose_cmd up -d postgres; then
         log "ERROR" "Failed to start PostgreSQL container"
         return 1
     fi
@@ -353,25 +385,25 @@ start_docker_services() {
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
-        if docker-compose exec -T postgres pg_isready -U n8n >/dev/null 2>&1; then
+        if $compose_cmd exec -T postgres pg_isready -U n8n >/dev/null 2>&1; then
             log "SUCCESS" "PostgreSQL is ready"
             break
         fi
-        
+
         log "INFO" "PostgreSQL health check $attempt/$max_attempts..."
         sleep 5
         ((attempt++))
     done
-    
+
     if [ $attempt -gt $max_attempts ]; then
         log "ERROR" "PostgreSQL failed to become ready"
-        docker-compose logs postgres
+        $compose_cmd logs postgres
         return 1
     fi
-    
+
     # Now start N8N
     log "INFO" "Starting N8N container..."
-    if ! timeout 300 docker-compose up -d n8n; then
+    if ! timeout 300 $compose_cmd up -d n8n; then
         log "ERROR" "Failed to start N8N container"
         return 1
     fi
@@ -395,12 +427,12 @@ start_docker_services() {
     if [ $attempt -gt $max_attempts ]; then
         log "WARNING" "N8N may still be starting up"
         log "INFO" "Checking N8N logs..."
-        docker-compose logs --tail=10 n8n || true
+        $compose_cmd logs --tail=10 n8n || true
     fi
-    
+
     # Final status check
     log "INFO" "Final container status:"
-    docker-compose ps
+    $compose_cmd ps
     
     log "SUCCESS" "Docker services startup completed"
 }

@@ -126,4 +126,15 @@ EOF
     
     log "SUCCESS" "N8N configuration created"
     log "INFO" "Credentials saved to $N8N_DIR/credentials.txt"
+
+    # Debug: Verify file was created successfully
+    if [ -f "docker-compose.yml" ]; then
+        log "INFO" "docker-compose.yml created successfully"
+        log "INFO" "File size: $(wc -c < docker-compose.yml) bytes"
+        log "INFO" "First few lines:"
+        head -n 5 docker-compose.yml
+    else
+        log "ERROR" "docker-compose.yml was not created!"
+        return 1
+    fi
 }
