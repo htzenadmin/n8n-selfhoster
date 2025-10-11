@@ -509,22 +509,105 @@ EOF
         fi
     fi
 
+    # Pre-flight network connectivity check
+    log "INFO" "Checking Docker registry connectivity..."
+    if ! nslookup registry-1.docker.io >/dev/null 2>&1; then
+        log "WARNING" "DNS resolution failed for Docker registry"
+        log "INFO" "Configuring Docker with alternative DNS servers..."
+
+        # Configure Docker daemon with alternative DNS
+        mkdir -p /etc/docker
+        cat > /etc/docker/daemon.json << 'EOF'
+{
+  "dns": ["8.8.8.8", "8.8.4.4"],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "storage-driver": "overlay2"
+}
+EOF
+        systemctl restart docker
+        sleep 10
+        log "INFO" "Docker restarted with alternative DNS"
+    else
+        log "SUCCESS" "Docker registry connectivity confirmed"
+    fi
+
     # Ensure clean state
     log "INFO" "Ensuring clean Docker state..."
     $compose_cmd -f "$compose_file" down -v >/dev/null 2>&1 || true
     docker system prune -f >/dev/null 2>&1 || true
 
+    # Pre-pull images to avoid timeout issues
+    log "INFO" "Pre-downloading container images..."
+    log "INFO" "Downloading PostgreSQL image..."
+    if ! timeout 600 docker pull postgres:13; then
+        log "WARNING" "Failed to pre-pull PostgreSQL image, will try during startup"
+    fi
+
+    log "INFO" "Downloading N8N image..."
+    if ! timeout 600 docker pull n8nio/n8n:latest; then
+        log "WARNING" "Failed to pre-pull N8N image, will try during startup"
+    fi
+
     # Start N8N services
     log "INFO" "Starting N8N and PostgreSQL containers..."
-    log "INFO" "This may take several minutes to download images..."
+    log "INFO" "This may take several minutes if images weren't pre-downloaded..."
 
     # Start PostgreSQL first and wait for it
     log "INFO" "Starting PostgreSQL container..."
     if ! timeout 300 $compose_cmd -f "$compose_file" up -d postgres; then
         log "ERROR" "Failed to start PostgreSQL container"
-        log "INFO" "Docker compose file contents:"
-        cat "$compose_file"
-        return 1
+
+        # Diagnose network connectivity issues
+        log "INFO" "Diagnosing network connectivity..."
+
+        # Test DNS resolution
+        if ! nslookup registry-1.docker.io >/dev/null 2>&1; then
+            log "WARNING" "DNS resolution failed for registry-1.docker.io"
+            log "INFO" "Trying alternative DNS servers..."
+
+            # Try with Google DNS
+            if nslookup registry-1.docker.io 8.8.8.8 >/dev/null 2>&1; then
+                log "INFO" "Google DNS works, configuring Docker to use alternative DNS"
+                # Configure Docker daemon with alternative DNS
+                mkdir -p /etc/docker
+                cat > /etc/docker/daemon.json << 'EOF'
+{
+  "dns": ["8.8.8.8", "8.8.4.4"],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "storage-driver": "overlay2"
+}
+EOF
+                systemctl restart docker
+                sleep 10
+                log "INFO" "Docker restarted with alternative DNS, retrying..."
+
+                # Retry the container start
+                if timeout 300 $compose_cmd -f "$compose_file" up -d postgres; then
+                    log "SUCCESS" "PostgreSQL container started after DNS fix"
+                else
+                    log "ERROR" "PostgreSQL container still failed after DNS fix"
+                    log "INFO" "Docker compose file contents:"
+                    cat "$compose_file"
+                    return 1
+                fi
+            else
+                log "ERROR" "All DNS servers failed, check network connectivity"
+                return 1
+            fi
+        else
+            log "INFO" "DNS resolution works, checking other issues..."
+            log "INFO" "Docker compose file contents:"
+            cat "$compose_file"
+            return 1
+        fi
     fi
     
     # Wait for PostgreSQL to be healthy
