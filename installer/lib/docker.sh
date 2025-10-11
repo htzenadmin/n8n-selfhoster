@@ -356,13 +356,13 @@ start_docker_services() {
 
     # Try to validate the configuration, but don't fail if it doesn't work
     log "INFO" "Attempting to validate docker-compose configuration..."
-    if $compose_cmd config >/dev/null 2>&1; then
+    if $compose_cmd -f docker-compose.yml config >/dev/null 2>&1; then
         log "SUCCESS" "docker-compose.yml configuration is valid"
     else
         log "WARNING" "docker-compose config validation failed, but proceeding anyway"
         log "INFO" "This might be due to docker-compose version compatibility issues"
         log "INFO" "Validation error output:"
-        $compose_cmd config 2>&1 || true
+        $compose_cmd -f docker-compose.yml config 2>&1 || true
 
         # Test with a simple docker-compose command to see if basic functionality works
         log "INFO" "Testing basic docker-compose functionality..."
@@ -374,9 +374,19 @@ start_docker_services() {
         fi
     fi
 
+    # Store the full path to docker-compose.yml
+    local compose_file="$N8N_DIR/docker-compose.yml"
+    log "INFO" "Using docker-compose file: $compose_file"
+
+    # Verify file exists with full path
+    if [ ! -f "$compose_file" ]; then
+        log "ERROR" "docker-compose.yml not found at: $compose_file"
+        return 1
+    fi
+
     # Ensure clean state
     log "INFO" "Ensuring clean Docker state..."
-    $compose_cmd down -v >/dev/null 2>&1 || true
+    $compose_cmd -f "$compose_file" down -v >/dev/null 2>&1 || true
     docker system prune -f >/dev/null 2>&1 || true
 
     # Start N8N services
@@ -385,8 +395,10 @@ start_docker_services() {
 
     # Start PostgreSQL first and wait for it
     log "INFO" "Starting PostgreSQL container..."
-    if ! timeout 300 $compose_cmd up -d postgres; then
+    if ! timeout 300 $compose_cmd -f "$compose_file" up -d postgres; then
         log "ERROR" "Failed to start PostgreSQL container"
+        log "INFO" "Docker compose file contents:"
+        cat "$compose_file"
         return 1
     fi
     
@@ -396,7 +408,7 @@ start_docker_services() {
     local attempt=1
     
     while [ $attempt -le $max_attempts ]; do
-        if $compose_cmd exec -T postgres pg_isready -U n8n >/dev/null 2>&1; then
+        if $compose_cmd -f "$compose_file" exec -T postgres pg_isready -U n8n >/dev/null 2>&1; then
             log "SUCCESS" "PostgreSQL is ready"
             break
         fi
@@ -408,13 +420,13 @@ start_docker_services() {
 
     if [ $attempt -gt $max_attempts ]; then
         log "ERROR" "PostgreSQL failed to become ready"
-        $compose_cmd logs postgres
+        $compose_cmd -f "$compose_file" logs postgres
         return 1
     fi
 
     # Now start N8N
     log "INFO" "Starting N8N container..."
-    if ! timeout 300 $compose_cmd up -d n8n; then
+    if ! timeout 300 $compose_cmd -f "$compose_file" up -d n8n; then
         log "ERROR" "Failed to start N8N container"
         return 1
     fi
@@ -438,12 +450,12 @@ start_docker_services() {
     if [ $attempt -gt $max_attempts ]; then
         log "WARNING" "N8N may still be starting up"
         log "INFO" "Checking N8N logs..."
-        $compose_cmd logs --tail=10 n8n || true
+        $compose_cmd -f "$compose_file" logs --tail=10 n8n || true
     fi
 
     # Final status check
     log "INFO" "Final container status:"
-    $compose_cmd ps
+    $compose_cmd -f "$compose_file" ps
     
     log "SUCCESS" "Docker services startup completed"
 }
