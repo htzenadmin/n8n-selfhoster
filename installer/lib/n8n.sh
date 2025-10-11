@@ -42,6 +42,18 @@ setup_n8n() {
     log "DEBUG" "Using timezone: $TIMEZONE"
     log "DEBUG" "N8N directory: $N8N_DIR"
 
+    # Format the webhook URL properly for IPv6 addresses
+    local webhook_url
+    if [[ "$DOMAIN_NAME" =~ : ]]; then
+        # IPv6 address - wrap in brackets
+        webhook_url="https://[$DOMAIN_NAME]/"
+        log "DEBUG" "Detected IPv6 address, using bracketed format: $webhook_url"
+    else
+        # Regular domain or IPv4 address
+        webhook_url="https://$DOMAIN_NAME/"
+        log "DEBUG" "Using standard URL format: $webhook_url"
+    fi
+
     # Create N8N directory
     mkdir -p "$N8N_DIR"
     cd "$N8N_DIR" || exit
@@ -88,7 +100,7 @@ services:
       - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
-      - WEBHOOK_URL=https://$DOMAIN_NAME/
+      - WEBHOOK_URL=$webhook_url
       - NODE_ENV=production
       - GENERIC_TIMEZONE=$TIMEZONE
       - N8N_LOG_LEVEL=info
@@ -116,8 +128,8 @@ Database Password: $DB_PASSWORD
 Admin Username: admin
 Admin Password: $ADMIN_PASSWORD
 
-Access URL: https://$DOMAIN_NAME
-Direct URL: https://$DOMAIN_NAME:5678 (if needed)
+Access URL: $webhook_url
+Direct URL: ${webhook_url%/}:5678 (if needed)
 
 IMPORTANT: Save these credentials securely and delete this file after copying!
 EOF
