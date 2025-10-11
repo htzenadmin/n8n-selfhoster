@@ -138,14 +138,28 @@ IMPORTANT: Save these credentials securely and delete this file after copying!
 EOF
     
     chmod 600 credentials.txt
-    
+
+    # Set proper permissions for docker-compose.yml
+    chmod 644 docker-compose.yml
+
+    # Ensure the directory is accessible by Docker
+    chmod 755 "$N8N_DIR"
+
+    # If running as root, ensure files are owned properly
+    if [ "$(id -u)" = "0" ]; then
+        chown root:docker docker-compose.yml 2>/dev/null || chown root:root docker-compose.yml
+        chown root:docker "$N8N_DIR" 2>/dev/null || chown root:root "$N8N_DIR"
+    fi
+
     log "SUCCESS" "N8N configuration created"
     log "INFO" "Credentials saved to $N8N_DIR/credentials.txt"
 
-    # Debug: Verify file was created successfully
+    # Debug: Verify file was created successfully with permissions
     if [ -f "docker-compose.yml" ]; then
         log "INFO" "docker-compose.yml created successfully"
         log "INFO" "File size: $(wc -c < docker-compose.yml) bytes"
+        log "INFO" "File permissions: $(ls -la docker-compose.yml)"
+        log "INFO" "Directory permissions: $(ls -lad "$N8N_DIR")"
         log "INFO" "First few lines:"
         head -n 5 docker-compose.yml
     else

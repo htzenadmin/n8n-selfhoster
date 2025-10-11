@@ -384,6 +384,49 @@ start_docker_services() {
         return 1
     fi
 
+    # Check file permissions and accessibility
+    log "INFO" "Checking file permissions and accessibility..."
+    log "INFO" "File permissions: $(ls -la "$compose_file")"
+    log "INFO" "Directory permissions: $(ls -lad "$N8N_DIR")"
+    log "INFO" "Current user: $(whoami)"
+    log "INFO" "User ID: $(id)"
+
+    # Test if file is readable
+    if [ -r "$compose_file" ]; then
+        log "INFO" "File is readable by current user"
+    else
+        log "ERROR" "File is not readable by current user"
+        return 1
+    fi
+
+    # Fix permissions if needed
+    if [ "$(id -u)" = "0" ]; then
+        log "INFO" "Running as root, ensuring proper permissions..."
+        chmod 644 "$compose_file"
+        chmod 755 "$N8N_DIR"
+    fi
+
+    # Test if docker-compose can actually read the file
+    log "INFO" "Testing if docker-compose can access the file..."
+    if $compose_cmd -f "$compose_file" config --services >/dev/null 2>&1; then
+        log "SUCCESS" "docker-compose can read the configuration file"
+    else
+        log "WARNING" "docker-compose cannot read the file, checking alternative methods..."
+
+        # Try copying the file to a more accessible location
+        local temp_compose="/tmp/docker-compose-n8n.yml"
+        cp "$compose_file" "$temp_compose"
+        chmod 644 "$temp_compose"
+
+        if $compose_cmd -f "$temp_compose" config --services >/dev/null 2>&1; then
+            log "INFO" "Using temporary file location: $temp_compose"
+            compose_file="$temp_compose"
+        else
+            log "ERROR" "docker-compose cannot read the file even from temporary location"
+            return 1
+        fi
+    fi
+
     # Ensure clean state
     log "INFO" "Ensuring clean Docker state..."
     $compose_cmd -f "$compose_file" down -v >/dev/null 2>&1 || true
