@@ -47,12 +47,15 @@ setup_n8n() {
     if [[ "$DOMAIN_NAME" =~ : ]]; then
         # IPv6 address - wrap in brackets
         webhook_url="https://[$DOMAIN_NAME]/"
-        log "DEBUG" "Detected IPv6 address, using bracketed format: $webhook_url"
+        log "INFO" "Detected IPv6 address, using bracketed format: $webhook_url"
     else
         # Regular domain or IPv4 address
         webhook_url="https://$DOMAIN_NAME/"
-        log "DEBUG" "Using standard URL format: $webhook_url"
+        log "INFO" "Using standard URL format: $webhook_url"
     fi
+
+    # Additional debug: Show what will be written to the file
+    log "INFO" "WEBHOOK_URL that will be written: $webhook_url"
 
     # Create N8N directory
     mkdir -p "$N8N_DIR"
@@ -100,7 +103,7 @@ services:
       - N8N_HOST=0.0.0.0
       - N8N_PORT=5678
       - N8N_PROTOCOL=https
-      - WEBHOOK_URL=$webhook_url
+      - "WEBHOOK_URL=$webhook_url"
       - NODE_ENV=production
       - GENERIC_TIMEZONE=$TIMEZONE
       - N8N_LOG_LEVEL=info
