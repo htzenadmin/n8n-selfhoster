@@ -28,7 +28,12 @@
 set -euo pipefail
 
 # Get the directory where the script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -n "${BASH_SOURCE[0]:-}" ]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    # Fallback for when script is piped (curl | bash)
+    SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+fi
 
 # Source all library modules (including performance optimizations)
 for lib in "$SCRIPT_DIR"/installer/lib/*.sh; do
@@ -339,7 +344,7 @@ main() {
 ###################################################################################
 
 # Check if script is being sourced
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
     parse_arguments "$@"
     main
 fi
