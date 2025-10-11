@@ -341,6 +341,13 @@ start_docker_services() {
     log "INFO" "Docker Compose version check:"
     docker-compose --version || docker compose version || log "ERROR" "No docker-compose found"
 
+    # Detect if Docker is installed via Snap (causes file access issues)
+    local docker_snap=false
+    if snap list docker >/dev/null 2>&1; then
+        docker_snap=true
+        log "WARNING" "Docker is installed via Snap, which may cause file access issues"
+    fi
+
     # Try different docker-compose commands (v1 vs v2)
     local compose_cmd=""
     if command -v docker-compose >/dev/null 2>&1; then
@@ -376,6 +383,81 @@ start_docker_services() {
 
     # Store the full path to docker-compose.yml
     local compose_file="$N8N_DIR/docker-compose.yml"
+
+    # If Docker is installed via Snap, use a location accessible to Snap
+    if [ "$docker_snap" = true ]; then
+        log "INFO" "Docker Snap detected, using home directory for compose file"
+        local snap_compose_dir="$HOME/n8n"
+        mkdir -p "$snap_compose_dir"
+
+        # Create a modified docker-compose.yml with Snap-compatible volume paths
+        log "INFO" "Creating Snap-compatible docker-compose.yml..."
+        cat > "$snap_compose_dir/docker-compose.yml" << 'EOF'
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13
+    container_name: n8n-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: n8n
+      POSTGRES_USER: n8n
+EOF
+
+        # Add the dynamic password
+        echo "      POSTGRES_PASSWORD: $DB_PASSWORD" >> "$snap_compose_dir/docker-compose.yml"
+
+        # Continue with the rest of the configuration
+        cat >> "$snap_compose_dir/docker-compose.yml" << EOF
+    volumes:
+      - $HOME/n8n/postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -U n8n -d n8n"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5678:5678"
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n
+      - DB_POSTGRESDB_USER=n8n
+      - DB_POSTGRESDB_PASSWORD=$DB_PASSWORD
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=$ADMIN_PASSWORD
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - "WEBHOOK_URL=https://[$DOMAIN_NAME]/"
+      - NODE_ENV=production
+      - GENERIC_TIMEZONE=$TIMEZONE
+      - N8N_LOG_LEVEL=info
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_RUNNERS_ENABLED=true
+    volumes:
+      - $HOME/n8n/n8n_data:/home/node/.n8n
+    depends_on:
+      postgres:
+        condition: service_healthy
+EOF
+
+        # Create the data directories
+        mkdir -p "$HOME/n8n/postgres_data" "$HOME/n8n/n8n_data"
+        chmod 755 "$HOME/n8n" "$HOME/n8n/postgres_data" "$HOME/n8n/n8n_data"
+        chmod 644 "$snap_compose_dir/docker-compose.yml"
+        compose_file="$snap_compose_dir/docker-compose.yml"
+        log "INFO" "Created Snap-compatible compose file: $compose_file"
+    fi
+
     log "INFO" "Using docker-compose file: $compose_file"
 
     # Verify file exists with full path
