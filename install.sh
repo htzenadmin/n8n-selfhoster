@@ -28,11 +28,48 @@
 set -euo pipefail
 
 # Get the directory where the script is located
-if [ -n "${BASH_SOURCE[0]:-}" ]; then
+# Handle different execution contexts (direct execution vs piped from curl)
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    # Script is executed directly from a file
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-else
-    # Fallback for when script is piped (curl | bash)
+elif [ -n "${0:-}" ] && [ -f "${0}" ]; then
+    # Fallback to $0 if available and is a file
     SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+else
+    # Script is piped (curl | bash) - download dependencies
+    SCRIPT_DIR="/tmp/n8n-installer-$$"
+    mkdir -p "$SCRIPT_DIR"
+    echo "INFO: Script running from pipe, will download dependencies to $SCRIPT_DIR"
+fi
+
+# Download library modules if running from pipe
+if [ "$SCRIPT_DIR" = "/tmp/n8n-installer-$$" ]; then
+    echo "INFO: Downloading library modules..."
+    mkdir -p "$SCRIPT_DIR/installer/lib"
+
+    # List of required library files
+    libs=(
+        "backup.sh" "common.sh" "docker.sh" "n8n.sh" "nginx.sh"
+        "performance.sh" "proxmox.sh" "security.sh" "ssl.sh"
+        "system.sh" "validation.sh"
+    )
+
+    for lib_file in "${libs[@]}"; do
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL "https://raw.githubusercontent.com/sylvester-francis/n8n-selfhoster/main/installer/lib/$lib_file" \
+                > "$SCRIPT_DIR/installer/lib/$lib_file" 2>/dev/null || {
+                echo "WARNING: Failed to download $lib_file, some features may be limited"
+            }
+        elif command -v wget >/dev/null 2>&1; then
+            wget -q "https://raw.githubusercontent.com/sylvester-francis/n8n-selfhoster/main/installer/lib/$lib_file" \
+                -O "$SCRIPT_DIR/installer/lib/$lib_file" 2>/dev/null || {
+                echo "WARNING: Failed to download $lib_file, some features may be limited"
+            }
+        else
+            echo "WARNING: Neither curl nor wget available, some features may be limited"
+            break
+        fi
+    done
 fi
 
 # Source all library modules (including performance optimizations)
