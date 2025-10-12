@@ -80,75 +80,36 @@ cp "$N8N_DIR/docker-compose.yml" "$N8N_DIR/docker-compose.yml.backup.$(date +%Y%
 # Step 5: Update docker-compose.yml for external access
 log "INFO" "Updating docker-compose.yml for Tailscale access..."
 
-# Create a temporary file with the updated configuration
-cat > /tmp/n8n-compose-update.yml << EOF
-version: '3.8'
-
-services:
-  postgres:
-    image: postgres:13
-    container_name: n8n-postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: n8n
-      POSTGRES_USER: n8n
-      POSTGRES_PASSWORD: $(grep "POSTGRES_PASSWORD:" "$N8N_DIR/docker-compose.yml" | cut -d':' -f2 | tr -d ' ')
-    volumes:
-      - $(grep -A1 "volumes:" "$N8N_DIR/docker-compose.yml" | tail -1 | sed 's/^[[:space:]]*//' | sed 's/- //')
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -U n8n -d n8n"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  n8n:
-    image: n8nio/n8n:latest
-    container_name: n8n
-    restart: unless-stopped
-    ports:
-      - "0.0.0.0:5678:5678"
-    environment:
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=postgres
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_DATABASE=n8n
-      - DB_POSTGRESDB_USER=n8n
-      - DB_POSTGRESDB_PASSWORD=$(grep "DB_POSTGRESDB_PASSWORD=" "$N8N_DIR/docker-compose.yml" | cut -d'=' -f2)
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=$(grep "N8N_BASIC_AUTH_PASSWORD=" "$N8N_DIR/docker-compose.yml" | cut -d'=' -f2)
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - WEBHOOK_URL=http://$TAILSCALE_IP:5678/
-      - NODE_ENV=production
-      - GENERIC_TIMEZONE=$(grep "GENERIC_TIMEZONE=" "$N8N_DIR/docker-compose.yml" | cut -d'=' -f2)
-      - N8N_LOG_LEVEL=info
-      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
-      - N8N_RUNNERS_ENABLED=true
-    volumes:
-      - $(grep -A1 "n8n_data:" "$N8N_DIR/docker-compose.yml" -A1 | tail -1 | sed 's/^[[:space:]]*//' | sed 's/- //')
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-volumes:
-  postgres_data:
-  n8n_data:
-EOF
-
-# Step 6: Apply the new configuration
-log "INFO" "Applying new configuration..."
 cd "$N8N_DIR"
 
-# Stop containers
+# Stop containers first
 log "INFO" "Stopping N8N containers..."
 docker-compose down
 
-# Replace the configuration
-mv /tmp/n8n-compose-update.yml "$N8N_DIR/docker-compose.yml"
+# Restore from backup if previous attempt failed
+if [ -f "docker-compose.yml.backup."* ]; then
+    log "INFO" "Restoring from backup..."
+    cp docker-compose.yml.backup.* docker-compose.yml
+fi
 
-# Start containers
+# Make targeted changes to the existing working configuration
+log "INFO" "Making targeted configuration changes..."
+
+# Change port binding from localhost to all interfaces
+sed -i 's/"127.0.0.1:5678:5678"/"0.0.0.0:5678:5678"/g' docker-compose.yml
+
+# Change protocol from HTTPS to HTTP for Tailscale
+sed -i 's/N8N_PROTOCOL=https/N8N_PROTOCOL=http/g' docker-compose.yml
+
+# Update webhook URL for Tailscale IP
+sed -i "s|WEBHOOK_URL=https://\[2607:fea8:1fdd:e520::c56c\]/|WEBHOOK_URL=http://$TAILSCALE_IP:5678/|g" docker-compose.yml
+
+# Ensure N8N_HOST is set correctly (should already be 0.0.0.0)
+sed -i 's/N8N_HOST=127.0.0.1/N8N_HOST=0.0.0.0/g' docker-compose.yml
+
+log "SUCCESS" "Configuration updated successfully"
+
+# Step 6: Start containers with new configuration
 log "INFO" "Starting N8N with new configuration..."
 docker-compose up -d
 
