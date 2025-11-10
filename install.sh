@@ -11,7 +11,7 @@
 # Description: Automated installer for N8N with HTTPS, PostgreSQL, and Nginx      #
 # Author: Sylvester Francis                                                       #
 # Version: 1.3.1 (Task Architecture Migration)                                        #
-# GitHub: https://github.com/sylvester-francis/n8n-selfhoster                     #
+# GitHub: https://github.com/htzenadmin/n8n-selfhoster                     #
 #                                                                                 #
 # Features:                                                                       #
 # - Docker & Docker Compose installation                                         #
@@ -56,12 +56,12 @@ if [ "$SCRIPT_DIR" = "/tmp/n8n-installer-$$" ]; then
 
     for lib_file in "${libs[@]}"; do
         if command -v curl >/dev/null 2>&1; then
-            curl -fsSL "https://raw.githubusercontent.com/sylvester-francis/n8n-selfhoster/main/installer/lib/$lib_file" \
+            curl -fsSL "https://raw.githubusercontent.com/htzenadmin/n8n-selfhoster/main/installer/lib/$lib_file" \
                 > "$SCRIPT_DIR/installer/lib/$lib_file" 2>/dev/null || {
                 echo "WARNING: Failed to download $lib_file, some features may be limited"
             }
         elif command -v wget >/dev/null 2>&1; then
-            wget -q "https://raw.githubusercontent.com/sylvester-francis/n8n-selfhoster/main/installer/lib/$lib_file" \
+            wget -q "https://raw.githubusercontent.com/htzenadmin/n8n-selfhoster/main/installer/lib/$lib_file" \
                 -O "$SCRIPT_DIR/installer/lib/$lib_file" 2>/dev/null || {
                 echo "WARNING: Failed to download $lib_file, some features may be limited"
             }
@@ -128,7 +128,7 @@ EXAMPLES:
     # Dry run to see what would happen
     sudo $0 --dry-run
 
-For more information, visit: https://github.com/sylvester-francis/n8n-selfhoster
+For more information, visit: https://github.com/htzenadmin/n8n-selfhoster
 
 EOF
 }
@@ -136,7 +136,7 @@ EOF
 show_version() {
     echo "N8N Self-Hosted Installer v$SCRIPT_VERSION"
     echo "Author: Sylvester Francis"
-    echo "GitHub: https://github.com/sylvester-francis/n8n-selfhoster"
+    echo "GitHub: https://github.com/htzenadmin/n8n-selfhoster"
 }
 
 parse_arguments() {
@@ -150,7 +150,7 @@ parse_arguments() {
     export DRY_RUN=false
     export FORCE_INTERACTIVE=false
     export INSTALLATION_TYPE="auto"  # auto, standard, proxmox
-    
+
     while [[ $# -gt 0 ]]; do
         case $1 in
             -h|--help)
@@ -235,22 +235,22 @@ parse_arguments() {
 main() {
     # Initialize logging
     init_logging
-    
+
     local start_time
     start_time=$(date +%s)
     local failed_steps=()
-    
+
     # Performance optimization setup
     log "INFO" "Applying performance optimizations..."
     optimize_system_performance 2>/dev/null || true
-    
+
     # Helper function to run a step with performance tracking
     run_step_optimized() {
         local step_name="$1"
         local step_function="$2"
         local step_start
         step_start=$(date +%s)
-        
+
         log "DEBUG" "Starting step: $step_name"
         if $step_function; then
             local step_end
@@ -264,7 +264,7 @@ main() {
             return 1
         fi
     }
-    
+
     # Parallel pre-checks for better performance
     log "INFO" "Running parallel pre-checks..."
     (
@@ -272,10 +272,10 @@ main() {
         setup_package_cache 2>/dev/null || true
     ) &
     local precheck_pid=$!
-    
+
     # Run critical installation steps
     run_step_optimized "show_welcome" "show_welcome" || true
-    
+
     # Apply environment-specific optimizations based on installation type
     if [ "${INSTALLATION_TYPE:-}" = "proxmox" ]; then
         log "INFO" "Applying Proxmox VM optimizations..."
@@ -289,44 +289,44 @@ main() {
             run_step_optimized "apply_proxmox_config" "apply_proxmox_optimizations" || true
         fi
     fi
-    
+
     run_step_optimized "check_requirements" "check_requirements" || exit 1
     run_step_optimized "get_configuration" "get_configuration" || exit 1
-    
+
     # Get Proxmox-specific configuration if using Proxmox mode
     if [ "${INSTALLATION_TYPE:-}" = "proxmox" ]; then
         run_step_optimized "get_proxmox_configuration" "get_proxmox_configuration" || true
     fi
-    
+
     # Wait for pre-checks to complete
     wait $precheck_pid 2>/dev/null || true
-    
+
     # Optimized installation sequence
     run_step_optimized "update_system" "update_system" || exit 1
     run_step_optimized "install_docker" "install_docker" || exit 1
-    
+
     # Parallel installation of nginx and SSL (independent tasks)
     log "INFO" "Running parallel nginx and SSL setup..."
     (
         install_nginx 2>/dev/null || log "WARNING" "Nginx installation had issues"
     ) &
     local nginx_pid=$!
-    
+
     (
         generate_ssl_certificate 2>/dev/null || log "WARNING" "SSL generation had issues"
     ) &
     local ssl_pid=$!
-    
+
     # Continue with N8N setup while others run in parallel
     run_step_optimized "setup_n8n" "setup_n8n" || exit 1
-    
+
     # Wait for parallel tasks
     wait $nginx_pid 2>/dev/null || true
     wait $ssl_pid 2>/dev/null || true
-    
+
     # Complete remaining configuration
     run_step_optimized "configure_nginx" "configure_nginx" || true
-    
+
     # Parallel security and backup setup
     log "INFO" "Running parallel security configuration..."
     (
@@ -334,37 +334,37 @@ main() {
         setup_security 2>/dev/null || true
     ) &
     local security_pid=$!
-    
+
     (
         setup_backups 2>/dev/null || true
         setup_environment 2>/dev/null || true
     ) &
     local backup_pid=$!
-    
+
     # Start services
     run_step_optimized "start_docker_services" "start_docker_services" || exit 1
     run_step_optimized "start_nginx" "start_nginx" || true
-    
+
     # Wait for parallel configurations
     wait $security_pid 2>/dev/null || true
     wait $backup_pid 2>/dev/null || true
-    
+
     # Calculate total installation time
     local end_time
     end_time=$(date +%s)
     local total_duration=$((end_time - start_time))
     local minutes=$((total_duration / 60))
     local seconds=$((total_duration % 60))
-    
+
     # Report performance metrics
     if [ ${#failed_steps[@]} -gt 0 ]; then
         log "WARNING" "Some installation steps failed: ${failed_steps[*]}"
     fi
-    
+
     # Run final validation
     log "DEBUG" "Running final tests"
     run_step_optimized "run_proxmox_validation" "run_proxmox_validation" || true
-    
+
     if run_tests; then
         show_summary
         log "SUCCESS" "🚀 N8N installation completed successfully in ${minutes}m ${seconds}s!"
@@ -384,4 +384,4 @@ main() {
 if [[ "${BASH_SOURCE[0]:-$0}" == "${0}" ]]; then
     parse_arguments "$@"
     main
-fi
+fi%
