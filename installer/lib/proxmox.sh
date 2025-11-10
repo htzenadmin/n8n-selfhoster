@@ -119,16 +119,53 @@ apply_proxmox_optimizations() {
 
 configure_docker_for_proxmox() {
     log "INFO" "Configuring Docker for Proxmox environment..."
-    
+
     # Create Proxmox-optimized Docker daemon configuration
     local docker_config="/etc/docker/daemon.json"
-    
+
     if [ -f "$docker_config" ]; then
         # Backup existing config
         cp "$docker_config" "${docker_config}.backup.$(date +%Y%m%d_%H%M%S)"
     fi
-    
-    cat > "$docker_config" << 'EOF'
+
+    # Detect Ubuntu version
+    local ubuntu_version=""
+    if [ -f /etc/os-release ]; then
+        ubuntu_version=$(grep VERSION_ID /etc/os-release | cut -d'"' -f2 | cut -d'.' -f1)
+    fi
+
+    log "INFO" "Detected Ubuntu version: ${ubuntu_version:-unknown}"
+
+    # Ubuntu 24.04+ requires different Docker daemon configuration
+    # Removed deprecated options: storage-opts, default-runtime, runtimes
+    if [ -n "$ubuntu_version" ] && [ "$ubuntu_version" -ge 24 ]; then
+        log "INFO" "Using Ubuntu 24.04+ compatible Docker configuration"
+        cat > "$docker_config" << 'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "10m",
+    "max-file": "3"
+  },
+  "storage-driver": "overlay2",
+  "live-restore": true,
+  "userland-proxy": false,
+  "experimental": false,
+  "metrics-addr": "127.0.0.1:9323",
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "bridge": "docker0",
+  "fixed-cidr": "172.17.0.0/16",
+  "default-address-pools": [
+    {
+      "base": "172.20.0.0/16",
+      "size": 24
+    }
+  ]
+}
+EOF
+    else
+        log "INFO" "Using legacy Docker configuration for Ubuntu < 24.04"
+        cat > "$docker_config" << 'EOF'
 {
   "log-driver": "json-file",
   "log-opts": {
@@ -160,7 +197,8 @@ configure_docker_for_proxmox() {
   ]
 }
 EOF
-    
+    fi
+
     log "SUCCESS" "Docker configuration optimized for Proxmox"
 }
 
